@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { Truck, ArrowRight, Smartphone, Lock, CheckCircle, MapPin, Calendar, Wallet, Bell, Menu, Search, Box } from 'lucide-react-native';
+import { Truck, Smartphone, Lock, Wallet, Bell, Menu, Search, MapPin } from 'lucide-react-native';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, Animated, ScrollView, Modal, Alert } from 'react-native';
 
-// ⚠️ REPLACE WITH YOUR LAPTOP'S IP ADDRESS (Keep the :3000 part)
+// ⚠️ REPLACE WITH YOUR LAPTOP'S IP ADDRESS
 const API_URL = "http://10.99.18.78:3000/api/mobile"; 
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<"LOGIN" | "REGISTRATION" | "DASHBOARD">("LOGIN");
   const [userStatus, setUserStatus] = useState<"NEW" | "PENDING" | "APPROVED">("NEW");
   const [myFleet, setMyFleet] = useState<any[]>([]);
-  const [availableLoads, setAvailableLoads] = useState<any[]>([]); // Data from API
+  const [availableLoads, setAvailableLoads] = useState<any[]>([]); 
 
   // LOGIN STATE
   const [step, setStep] = useState<"PHONE" | "OTP">("PHONE");
@@ -45,22 +45,50 @@ export default function App() {
       });
       return await res.json();
     } catch (error) {
-      Alert.alert("Connection Error", "Ensure Laptop & Phone are on same WiFi");
+      console.log(error); // Log error for debugging
       return null;
     }
   };
 
-  // --- 1. HANDLE LOGIN (REAL API) ---
+  // --- 5. CHECK USER STATUS (SYNC BUG FIXED) ---
+  const checkUserStatus = async () => {
+    if (!phone) return;
+    
+    // Silent API call
+    const res = await apiCall({ action: 'VERIFY_OTP', phone, otp: '1234' });
+    
+    if (res?.success) {
+      // FIX: Removed the "if (status !== status)" check.
+      // Now it ALWAYS updates, so you see approved trucks instantly!
+      setUserStatus(res.user.status);
+      setMyFleet(res.user.fleet); 
+    }
+  };
+
+  // Run this AUTOMATICALLY when "currentScreen" changes to DASHBOARD
+  useEffect(() => {
+    if (currentScreen === "DASHBOARD") {
+      checkUserStatus();
+    }
+  }, [currentScreen]);
+
+  // --- 1. HANDLE LOGIN ---
   const handleLogin = async () => {
+    if (step === "PHONE" && phone.length < 10) { 
+       Alert.alert("Error", "Please enter a valid phone number");
+       return; 
+    }
+    if (step === "OTP" && otp.length < 4) { 
+       Alert.alert("Error", "Please enter valid OTP");
+       return;
+    }
     setLoading(true);
     
     if (step === "PHONE") {
-      // Send OTP
       const res = await apiCall({ action: 'SEND_OTP', phone });
       setLoading(false);
       if (res?.success) setStep("OTP");
     } else {
-      // Verify OTP
       const res = await apiCall({ action: 'VERIFY_OTP', phone, otp });
       setLoading(false);
       
@@ -71,7 +99,7 @@ export default function App() {
         if (res.user.status === "NEW") {
           setCurrentScreen("REGISTRATION");
         } else {
-          fetchLoads(); // Get data before showing dashboard
+          fetchLoads(); 
           setCurrentScreen("DASHBOARD");
         }
       } else {
@@ -80,7 +108,7 @@ export default function App() {
     }
   };
 
-  // --- 2. FETCH LOADS (REAL API) ---
+  // --- 2. FETCH LOADS ---
   const fetchLoads = async () => {
     const res = await apiCall({ action: 'GET_LOADS' });
     if (res?.success) setAvailableLoads(res.loads);
@@ -108,10 +136,17 @@ export default function App() {
     }
     
     const loadWeight = parseInt(load.weight);
-    const capableTruck = myFleet.find(truck => truck.capacity >= loadWeight);
+    
+    const capableTruck = myFleet.find(truck => {
+      const truckCapacity = typeof truck.capacity === 'string' 
+          ? parseInt(truck.capacity) 
+          : truck.capacity;
+          
+      return truckCapacity >= loadWeight;
+    });
 
     if (!capableTruck) {
-      Alert.alert("Truck Too Small 🚛", `This load is ${load.weight}. Your biggest truck is only 12 Tons.`);
+      Alert.alert("Truck Too Small 🚛", `This load requires ${load.weight}. Your verified trucks are not big enough.`);
       return;
     }
 
@@ -131,7 +166,7 @@ export default function App() {
     }
   };
 
-  // --- REGISTRATION SCREEN ---
+  // --- SCREENS ---
   const RegistrationScreen = () => (
     <View style={styles.container}>
       <View style={[styles.header, { height: 140, justifyContent: 'flex-end', paddingBottom: 30 }]}>
@@ -141,13 +176,10 @@ export default function App() {
         <ScrollView style={{ flex: 1, backgroundColor: 'white', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 30 }}>
           <Text style={styles.sectionTitle}>Complete Your Profile</Text>
           <Text style={{color: '#64748b', marginBottom: 20}}>Verify your identity to start bidding.</Text>
-
           <Text style={styles.inputLabel}>FULL NAME</Text>
           <TextInput style={[styles.inputBox, {height: 50, fontSize: 16}]} placeholder="Enter name" />
-          
           <Text style={styles.inputLabel}>AADHAR NUMBER</Text>
           <TextInput style={[styles.inputBox, {height: 50, fontSize: 16}]} placeholder="XXXX-XXXX-XXXX" keyboardType="number-pad" />
-
           <TouchableOpacity onPress={submitDocuments} disabled={loading} style={[styles.button, loading && {backgroundColor:'#cbd5e1'}]}>
              {loading ? <ActivityIndicator color="white"/> : <Text style={styles.buttonText}>Submit Documents</Text>}
           </TouchableOpacity>
@@ -156,74 +188,99 @@ export default function App() {
     </View>
   );
 
-  // --- DASHBOARD ---
-  const Dashboard = () => (
-    <View style={styles.dashContainer}>
-      <StatusBar style="light" />
-      <View style={{ flex: 1, paddingBottom: 80 }}> 
-        <View style={styles.dashHeader}>
-          <View style={styles.headerTop}>
-            <TouchableOpacity style={styles.menuBtn}><Menu color="white" size={24} /></TouchableOpacity>
-            <View><Text style={styles.welcomeText}>Welcome back,</Text><Text style={styles.userName}>Ramesh Transports</Text></View>
-            <TouchableOpacity style={styles.notifBtn}><Bell color="white" size={24} /><View style={styles.redDot} /></TouchableOpacity>
-          </View>
-        </View>
+  const Dashboard = () => {
+    const [searchText, setSearchText] = useState("");
+    const filteredLoads = availableLoads.filter(load => 
+      load.from.toLowerCase().includes(searchText.toLowerCase()) || 
+      load.to.toLowerCase().includes(searchText.toLowerCase())
+    );
 
-        {currentTab === "LOADS" && (
-            <ScrollView showsVerticalScrollIndicator={false}>
-               {userStatus === "PENDING" && (
-                 <View style={{ backgroundColor: '#fff7ed', margin: 20, marginBottom: 0, padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#fdba74', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                    <Lock color="#ea580c" size={24} />
-                    <View style={{flex: 1}}><Text style={{fontWeight: 'bold', color: '#9a3412'}}>Verification Pending</Text><Text style={{fontSize: 12, color: '#c2410c'}}>Bidding disabled until approval.</Text></View>
-                 </View>
-               )}
-               
-               <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Live Loads</Text></View>
-               
-               {availableLoads.map((load) => (
-                 <View key={load.id} style={styles.loadCard}>
-                    <View style={styles.loadHeader}><View style={styles.badge}><Text style={styles.badgeText}>{load.type}</Text></View><Text style={styles.price}>{load.price}</Text></View>
-                    <View style={styles.routeRow}>
-                       <View style={styles.routeNode}><View style={styles.dot} /><View style={styles.line} /><View style={[styles.dot, { backgroundColor: '#ea580c' }]} /></View>
-                       <View style={styles.routeText}><Text style={styles.city}>{load.from}</Text><Text style={styles.city}>{load.to}</Text></View>
-                    </View>
-                    <View style={styles.loadFooter}>
-                       <View style={styles.infoItem}><Truck size={14} color="#64748b" /><Text style={styles.infoText}>{load.weight}</Text></View>
-                       <TouchableOpacity style={styles.bidButton} onPress={() => openBidModal(load)}><Text style={styles.bidButtonText}>Bid Now</Text></TouchableOpacity>
-                    </View>
-                 </View>
-               ))}
-            </ScrollView>
-        )}
-        {currentTab === "TRIPS" && <View style={{padding:20}}><Text>Trips Screen</Text></View>}
-        {currentTab === "WALLET" && <View style={{padding:20}}><Text>Wallet Screen</Text></View>}
-        {currentTab === "FLEET" && <FleetScreen />}
-      </View>
-
-      <View style={styles.bottomNav}>
-         <TouchableOpacity style={styles.navItem} onPress={() => setCurrentTab("LOADS")}><Box color={currentTab==="LOADS"?"#0f172a":"#94a3b8"} size={24} /><Text style={styles.navText}>Loads</Text></TouchableOpacity>
-         <TouchableOpacity style={styles.navItem} onPress={() => setCurrentTab("TRIPS")}><MapPin color={currentTab==="TRIPS"?"#0f172a":"#94a3b8"} size={24} /><Text style={styles.navText}>Trips</Text></TouchableOpacity>
-         <TouchableOpacity style={styles.navItem} onPress={() => setCurrentTab("WALLET")}><Wallet color={currentTab==="WALLET"?"#0f172a":"#94a3b8"} size={24} /><Text style={styles.navText}>Wallet</Text></TouchableOpacity>
-         <TouchableOpacity style={styles.navItem} onPress={() => setCurrentTab("FLEET")}><Truck color={currentTab==="FLEET"?"#0f172a":"#94a3b8"} size={24} /><Text style={styles.navText}>Fleet</Text></TouchableOpacity>
-      </View>
-
-      <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}><Text style={styles.modalTitle}>Place Your Bid</Text><TouchableOpacity onPress={() => setModalVisible(false)}><Text style={styles.closeText}>Close</Text></TouchableOpacity></View>
-            {selectedLoad && (
+    return (
+      <View style={styles.dashContainer}>
+        <StatusBar style="light" />
+        <View style={{ flex: 1, paddingBottom: 80 }}> 
+          <View style={styles.dashHeader}>
+            <View style={styles.headerTop}>
+              <TouchableOpacity style={styles.menuBtn} onPress={() => Alert.alert("Menu", "Profile, Settings, and History will go here.")}>
+                 <Menu color="white" size={24} />
+              </TouchableOpacity>
               <View>
-                 <Text style={styles.modalPrice}>{selectedLoad.price}</Text>
-                 <View style={styles.bidInputBox}><Text style={styles.currencySymbol}>₹</Text><TextInput style={styles.bidInput} value={myBid} onChangeText={setMyBid} keyboardType="number-pad" autoFocus /></View>
-                 <TouchableOpacity style={styles.submitButton} onPress={submitBid} disabled={loading}>{loading ? <ActivityIndicator color="white"/> : <Text style={styles.submitButtonText}>Submit Bid</Text>}</TouchableOpacity>
+                 <Text style={styles.welcomeText}>Welcome back,</Text>
+                 <Text style={styles.userName}>Ramesh Transports</Text>
+              </View>
+              <TouchableOpacity style={styles.notifBtn} onPress={() => Alert.alert("Notifications", "You have 3 new load alerts.")}>
+                 <Bell color="white" size={24} />
+                 <View style={styles.redDot} />
+              </TouchableOpacity>
+            </View>
+            {currentTab === "LOADS" && (
+              <View style={styles.searchBar}>
+                 <Search color="#94a3b8" size={20} />
+                 <TextInput placeholder="Search (e.g. Mumbai)" placeholderTextColor="#94a3b8" style={styles.searchInput} value={searchText} onChangeText={setSearchText} />
               </View>
             )}
           </View>
+
+          {currentTab === "LOADS" && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                 {userStatus === "PENDING" && (
+                   <View style={{ backgroundColor: '#fff7ed', margin: 20, marginBottom: 0, padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#fdba74', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Lock color="#ea580c" size={24} />
+                      <View style={{flex: 1}}><Text style={{fontWeight: 'bold', color: '#9a3412'}}>Verification Pending</Text><Text style={{fontSize: 12, color: '#c2410c'}}>Bidding disabled until approval.</Text></View>
+                   </View>
+                 )}
+                 <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>Live Loads ({filteredLoads.length})</Text>
+                 </View>
+                 {filteredLoads.map((load) => (
+                   <View key={load.id} style={styles.loadCard}>
+                      <View style={styles.loadHeader}><View style={styles.badge}><Text style={styles.badgeText}>{load.type}</Text></View><Text style={styles.price}>{load.price}</Text></View>
+                      <View style={styles.routeRow}>
+                         <View style={styles.routeNode}><View style={styles.dot} /><View style={styles.line} /><View style={[styles.dot, { backgroundColor: '#ea580c' }]} /></View>
+                         <View style={styles.routeText}><Text style={styles.city}>{load.from}</Text><Text style={styles.city}>{load.to}</Text></View>
+                      </View>
+                      <View style={styles.loadFooter}>
+                         <View style={styles.infoItem}><Truck size={14} color="#64748b" /><Text style={styles.infoText}>{load.weight}</Text></View>
+                         <TouchableOpacity style={styles.bidButton} onPress={() => openBidModal(load)}><Text style={styles.bidButtonText}>Bid Now</Text></TouchableOpacity>
+                      </View>
+                   </View>
+                 ))}
+              </ScrollView>
+          )}
+          {currentTab === "TRIPS" && <View style={{padding:20}}><Text>Trips Screen</Text></View>}
+          {currentTab === "WALLET" && <View style={{padding:20}}><Text>Wallet Screen</Text></View>}
+          {currentTab === "FLEET" && <FleetScreen />}
         </View>
-      </Modal>
-    </View>
-  );
-  // --- MY FLEET SCREEN ---
+
+        <View style={styles.bottomNav}>
+           <TouchableOpacity style={styles.navItem} onPress={() => setCurrentTab("LOADS")}><Truck color={currentTab==="LOADS"?"#0f172a":"#94a3b8"} size={24} /><Text style={styles.navText}>Loads</Text></TouchableOpacity>
+           <TouchableOpacity style={styles.navItem} onPress={() => setCurrentTab("TRIPS")}><MapPin color={currentTab==="TRIPS"?"#0f172a":"#94a3b8"} size={24} /><Text style={styles.navText}>Trips</Text></TouchableOpacity>
+           <TouchableOpacity style={styles.navItem} onPress={() => setCurrentTab("WALLET")}><Wallet color={currentTab==="WALLET"?"#0f172a":"#94a3b8"} size={24} /><Text style={styles.navText}>Wallet</Text></TouchableOpacity>
+           <TouchableOpacity style={styles.navItem} onPress={() => setCurrentTab("FLEET")}><Truck color={currentTab==="FLEET"?"#0f172a":"#94a3b8"} size={24} /><Text style={styles.navText}>Fleet</Text></TouchableOpacity>
+        </View>
+
+        <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}><Text style={styles.modalTitle}>Place Your Bid</Text><TouchableOpacity onPress={() => setModalVisible(false)}><Text style={styles.closeText}>Close</Text></TouchableOpacity></View>
+              {selectedLoad && (
+                <View>
+                   <Text style={{color:'#64748b', fontWeight:'bold', fontSize:12}}>CLIENT PRICE</Text>
+                   <Text style={styles.modalPrice}>{selectedLoad.price}</Text>
+                   
+                   <Text style={{color:'#64748b', fontWeight:'bold', fontSize:12, marginTop:10}}>YOUR OFFER (Edit this)</Text>
+                   <View style={styles.bidInputBox}><Text style={styles.currencySymbol}>₹</Text><TextInput style={styles.bidInput} value={myBid} onChangeText={setMyBid} keyboardType="number-pad" autoFocus /></View>
+                   
+                   <TouchableOpacity style={styles.submitButton} onPress={submitBid} disabled={loading}>{loading ? <ActivityIndicator color="white"/> : <Text style={styles.submitButtonText}>Submit Bid</Text>}</TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
+      </View>
+    );
+  };
+
   const FleetScreen = () => {
     const [newTruckNum, setNewTruckNum] = useState("");
     const [newTruckCap, setNewTruckCap] = useState("");
@@ -232,12 +289,19 @@ export default function App() {
     const handleAddTruck = async () => {
       if (!newTruckNum || !newTruckCap) return Alert.alert("Error", "Fill all details");
       setLoading(true);
-      const res = await apiCall({ action: 'ADD_TRUCK', truckNumber: newTruckNum, capacity: newTruckCap });
+      
+      const res = await apiCall({ 
+        action: 'ADD_TRUCK', 
+        truckNumber: newTruckNum, 
+        capacity: newTruckCap,
+        phone: phone
+      });
+      
       setLoading(false);
 
       if (res?.success) {
         Alert.alert("Success", "Truck added! Waiting for Help Desk approval.");
-        setMyFleet([...myFleet, res.truck]); // Update local list
+        setMyFleet([...myFleet, res.truck]); 
         setIsAdding(false);
         setNewTruckNum("");
         setNewTruckCap("");
@@ -247,9 +311,7 @@ export default function App() {
     return (
       <View style={{ flex: 1, backgroundColor: '#f1f5f9', padding: 20 }}>
          <Text style={styles.sectionTitle}>My Trucks ({myFleet.length})</Text>
-         
          <ScrollView showsVerticalScrollIndicator={false}>
-            {/* TRUCK LIST */}
             {myFleet.map((truck) => (
               <View key={truck.id} style={styles.loadCard}>
                  <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
@@ -258,15 +320,11 @@ export default function App() {
                        <Text style={styles.city}>{truck.capacity} Ton Capacity</Text>
                     </View>
                     <View style={[styles.badge, { backgroundColor: truck.status === 'APPROVED' ? '#dcfce7' : '#fff7ed' }]}>
-                       <Text style={{ fontWeight:'bold', color: truck.status === 'APPROVED' ? '#16a34a' : '#ea580c' }}>
-                          {truck.status}
-                       </Text>
+                       <Text style={{ fontWeight:'bold', color: truck.status === 'APPROVED' ? '#16a34a' : '#ea580c' }}>{truck.status}</Text>
                     </View>
                  </View>
               </View>
             ))}
-
-            {/* ADD TRUCK FORM */}
             {!isAdding ? (
                <TouchableOpacity onPress={() => setIsAdding(true)} style={[styles.button, {marginTop: 20, flexDirection:'row', gap: 10}]}>
                   <Text style={styles.buttonText}>+ Add New Truck</Text>
@@ -275,15 +333,11 @@ export default function App() {
                <View style={{ backgroundColor: 'white', padding: 20, borderRadius: 20, marginTop: 20 }}>
                   <Text style={styles.inputLabel}>TRUCK NUMBER</Text>
                   <TextInput style={[styles.inputBox, {height: 50}]} placeholder="HR-55-X-0000" value={newTruckNum} onChangeText={setNewTruckNum} />
-                  
                   <Text style={styles.inputLabel}>CAPACITY (TONS)</Text>
                   <TextInput style={[styles.inputBox, {height: 50}]} placeholder="e.g. 18" keyboardType="number-pad" value={newTruckCap} onChangeText={setNewTruckCap} />
-
                   <View style={{flexDirection:'row', gap: 10}}>
                      <TouchableOpacity onPress={() => setIsAdding(false)} style={{flex:1, padding:15, alignItems:'center'}}><Text style={{fontWeight:'bold', color:'#94a3b8'}}>Cancel</Text></TouchableOpacity>
-                     <TouchableOpacity onPress={handleAddTruck} style={{flex:1, backgroundColor:'#0f172a', padding:15, borderRadius: 12, alignItems:'center'}}>
-                        <Text style={{color:'white', fontWeight:'bold'}}>Save Truck</Text>
-                     </TouchableOpacity>
+                     <TouchableOpacity onPress={handleAddTruck} style={{flex:1, backgroundColor:'#0f172a', padding:15, borderRadius: 12, alignItems:'center'}}><Text style={{color:'white', fontWeight:'bold'}}>Save Truck</Text></TouchableOpacity>
                   </View>
                </View>
             )}
@@ -291,7 +345,7 @@ export default function App() {
       </View>
     );
   };
-  // --- RENDER ---
+
   if (currentScreen === "REGISTRATION") return <RegistrationScreen />;
   if (currentScreen === "DASHBOARD") return <Dashboard />;
 
@@ -304,9 +358,9 @@ export default function App() {
           <Text style={styles.label}>PARTNER PORTAL</Text>
           <Text style={styles.title}>{step === "PHONE" ? "Truck Owner Login" : "Verify OTP"}</Text>
           {step === "PHONE" ? (
-             <View style={styles.inputBox}><Smartphone size={20} color="#94a3b8" /><Text style={styles.prefix}>+91</Text><TextInput style={styles.input} placeholder="98765 43210" keyboardType="phone-pad" value={phone} onChangeText={setPhone} /></View>
+             <View style={styles.inputBox}><Smartphone size={20} color="#94a3b8" /><Text style={styles.prefix}>+91</Text><TextInput style={styles.input} placeholder="98765 43210" keyboardType="phone-pad" value={phone} onChangeText={setPhone} maxLength={15} /></View>
           ) : (
-             <View style={styles.inputBox}><Lock size={20} color="#94a3b8" /><TextInput style={styles.input} placeholder="1 2 3 4" keyboardType="number-pad" value={otp} onChangeText={setOtp} /></View>
+             <View style={styles.inputBox}><Lock size={20} color="#94a3b8" /><TextInput style={styles.input} placeholder="1 2 3 4" keyboardType="number-pad" value={otp} onChangeText={setOtp} maxLength={6} /></View>
           )}
           <TouchableOpacity onPress={handleLogin} disabled={loading} style={[styles.button, loading && { backgroundColor: '#cbd5e1' }]}>
             {loading ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>{step === "PHONE" ? "Get OTP" : "Verify Login"}</Text>}
@@ -340,6 +394,8 @@ const styles = StyleSheet.create({
   redDot: { position: 'absolute', top: 5, right: 5, width: 8, height: 8, backgroundColor: '#ef4444', borderRadius: 4 },
   welcomeText: { color: '#94a3b8', fontSize: 12, fontWeight: '600' },
   userName: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', borderRadius: 14, paddingHorizontal: 15, height: 50, marginTop: 20 },
+  searchInput: { flex: 1, color: 'white', marginLeft: 10, fontWeight: '500', fontSize: 16 },
   loadCard: { backgroundColor: 'white', marginHorizontal: 20, marginBottom: 15, borderRadius: 20, padding: 20, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
   loadHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   badge: { backgroundColor: '#e0f2fe', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },

@@ -1,91 +1,257 @@
 import { NextResponse } from "next/server";
+import { PrismaClient } from "@prisma/client";
 
-// --- MOCK DATABASE (Simulating Real Logic) ---
-const MOCK_FLEET = [
-  { id: 't1', number: 'HR-55-A-9090', capacity: 12, status: 'APPROVED' }, // Small Truck
-  { id: 't2', number: 'DL-11-Z-5555', capacity: 20, status: 'APPROVED' }  // Big Truck (Only for Approved User)
-];
-
-const MOCK_LOADS = [
-  { id: '1', from: 'Delhi, DEL', to: 'Mumbai, MAH', price: '₹45,000', weight: '18 Tons', type: 'Steel' },
-  { id: '2', from: 'Jaipur, RAJ', to: 'Pune, MAH', price: '₹32,500', weight: '12 Tons', type: 'Textiles' },
-  { id: '3', from: 'Gurgaon, HAR', to: 'Bangalore, KAR', price: '₹82,000', weight: '22 Tons', type: 'Electronics' },
-];
+const prisma = new PrismaClient();
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { action, phone, otp, bidAmount, loadId } = body;
+    const { action, phone, otp, truckNumber, capacity, loadId, bidAmount } =
+      body;
 
-    // 1. LOGIN: SEND OTP
+    // --- 0. SEND OTP ---
     if (action === "SEND_OTP") {
       console.log(`[MOBILE] Sending OTP to ${phone}`);
       return NextResponse.json({ success: true, message: "OTP Sent" });
     }
 
-    // 2. LOGIN: VERIFY OTP (The Magic Logic)
+    // --- 1. LOGIN (VERIFY OTP) ---
     if (action === "VERIFY_OTP") {
-      if (otp !== "1234") {
+      if (otp !== "1234")
         return NextResponse.json({ error: "Invalid OTP" }, { status: 400 });
-      }
-
-      // SIMULATE DIFFERENT USERS BASED ON PHONE NUMBER
-      let userStatus = "NEW"; 
-      let fleet = [];
-
-      if (phone.startsWith("90")) userStatus = "NEW";        // Test Registration
-      if (phone.startsWith("80")) userStatus = "PENDING";    // Test Verification Banner
-      if (phone.startsWith("70")) {
-        userStatus = "APPROVED";   // Test Bidding
-        fleet = MOCK_FLEET;        // Give them trucks
-      }
-
-      return NextResponse.json({ 
-        success: true, 
-        user: { name: "Truck Owner", status: userStatus, fleet: fleet } 
+      let owner = await prisma.truckOwner.findUnique({
+        where: { phone },
+        include: { trucks: true },
+      });
+      if (!owner)
+        return NextResponse.json({
+          success: true,
+          user: { status: "NEW", fleet: [] },
+        });
+      return NextResponse.json({
+        success: true,
+        user: {
+          name: owner.fullName,
+          status: owner.status,
+          fleet: owner.trucks,
+        },
       });
     }
 
-    // 3. REGISTER (KYC)
+    // --- 2. REGISTER ---
     if (action === "REGISTER") {
-      return NextResponse.json({ success: true, status: "PENDING" });
+      const newOwner = await prisma.truckOwner.create({
+        data: { phone: phone, fullName: "New Partner", status: "PENDING" },
+      });
+      return NextResponse.json({ success: true, user: newOwner });
     }
 
-    // 4. GET LOADS
+    // --- 3. ADD TRUCK ---
+    if (action === "ADD_TRUCK") {
+      if (!phone)
+        return NextResponse.json({ error: "Phone required" }, { status: 400 });
+      const owner = await prisma.truckOwner.findUnique({ where: { phone } });
+      if (!owner)
+        return NextResponse.json({ error: "Owner not found" }, { status: 404 });
+      const newTruck = await prisma.truck.create({
+        data: {
+          vehicleNumber: truckNumber,
+          capacity: capacity + " Tons",
+          truckType: "Open Body",
+          status: "PENDING",
+          ownerId: owner.id,
+        },
+      });
+      return NextResponse.json({
+        success: true,
+        truck: {
+          id: newTruck.id,
+          number: newTruck.vehicleNumber,
+          capacity: parseInt(newTruck.capacity),
+          status: newTruck.status,
+        },
+      });
+    }
+
+    // --- 4. GET LOADS (SMART VERSION: Shows Lowest Bid) ---
     if (action === "GET_LOADS") {
-      return NextResponse.json({ success: true, loads: MOCK_LOADS });
+      // 1. Fetch Orders
+      const orders = await prisma.order.findMany({
+        where: { status: "PENDING" }, // Only show open loads
+        include: { bids: true }, // <--- NEW: Get bids too!
+      });
+
+      // 2. Calculate "Current Best Price" for each load
+      const formattedLoads = orders.map((o) => {
+        // Find lowest bid
+        const lowestBid =
+          o.bids.length > 0
+            ? Math.min(...o.bids.map((b) => parseInt(b.amount)))
+            : parseInt(o.rate);
+
+        return {
+          id: o.id,
+          from: o.fromLocation,
+          to: o.toLocation,
+          price: "₹" + lowestBid, // <--- Shows Lowest Bid, not Base Price!
+          weight: o.weight,
+          type: o.material,
+        };
+      });
+
+      return NextResponse.json({ success: true, loads: formattedLoads });
     }
 
-    // 5. PLACE BID
+    // --- 5. PLACE BID ---
     if (action === "PLACE_BID") {
-      console.log(`[BID] Bid of ₹${bidAmount} placed on Load ${loadId}`);
+      const owner = await prisma.truckOwner.findUnique({ where: { phone } });
+      if (!owner)
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      let session = await prisma.biddingSession.findUnique({
+        where: { orderId: loadId },
+      });
+      if (!session) {
+        session = await prisma.biddingSession.create({
+          data: {
+            orderId: loadId,
+            endTime: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            basePrice: parseInt(bidAmount),
+            status: "LIVE",
+          },
+        });
+      }
+      const newBid = await prisma.bid.create({
+        data: {
+          amount: parseInt(bidAmount),
+          truckOwnerId: owner.id,
+          biddingSessionId: session.id,
+        },
+      });
+      return NextResponse.json({ success: true, bid: newBid });
+    }
+
+    // --- 6. CREATE ORDER ---
+    if (action === "CREATE_ORDER") {
+      const { from, to, price, weight, material } = body;
+      const admin = await prisma.user.findFirst({
+        where: { role: "SUPER_ADMIN" },
+      });
+      if (!admin)
+        return NextResponse.json({ error: "No Admin found." }, { status: 400 });
+      const newOrder = await prisma.order.create({
+        data: {
+          orderNo: `ORD-${Date.now()}`,
+          customerName: "Admin Created",
+          fromLocation: from,
+          toLocation: to,
+          material: material || "General Goods",
+          weight: weight + " Tons",
+          truckSize: "Open Body",
+          rate: parseInt(price),
+          status: "PENDING",
+          createdById: admin.id,
+          officeId: admin.officeId || "",
+        },
+      });
+      return NextResponse.json({ success: true, order: newOrder });
+    }
+
+    // --- 7. GET PENDING TRUCKS ---
+    if (action === "GET_PENDING_TRUCKS") {
+      const trucks = await prisma.truck.findMany({
+        where: { status: "PENDING" },
+        include: { owner: true },
+      });
+      return NextResponse.json({ success: true, trucks });
+    }
+
+    // --- 8. APPROVE TRUCK ---
+    if (action === "APPROVE_TRUCK") {
+      const truck = await prisma.truck.update({
+        where: { id: body.truckId },
+        data: { status: "APPROVED" },
+      });
+      await prisma.truckOwner.update({
+        where: { id: truck.ownerId },
+        data: { status: "APPROVED" },
+      });
       return NextResponse.json({ success: true });
     }
 
-    // 6. ADD TRUCK (The new logic)
-    if (action === "ADD_TRUCK") {
-      const { truckNumber, capacity } = body;
-      console.log(`[FLEET] Adding truck ${truckNumber} (${capacity} Tons)`);
-      
-      // Simulating a DB insert
-      const newTruck = { 
-        id: Math.random().toString(), 
-        number: truckNumber, 
-        capacity: parseInt(capacity), 
-        status: "PENDING" // Starts as pending!
-      };
-      
-      return NextResponse.json({ success: true, truck: newTruck });
+    // --- 9. GET ALL BIDS ---
+    if (action === "GET_ALL_BIDS") {
+      const bids = await prisma.bid.findMany({
+        include: { truckOwner: true, load: true },
+        orderBy: { amount: "asc" },
+      });
+      return NextResponse.json({ success: true, bids });
     }
 
-    return NextResponse.json({ error: "Invalid Action" }, { status: 400 });
+    // --- 10. ACCEPT BID (Closes the Load) ---
+    if (action === "ACCEPT_BID") {
+      const { orderId, bidId } = body;
 
+      // 1. Mark Order as ASSIGNED (Disappears from App)
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { status: "ASSIGNED" },
+      });
+
+      // 2. Mark Bid as ACCEPTED
+      await prisma.bid.update({
+        where: { id: bidId },
+        data: { status: "ACCEPTED" },
+      });
+
+      return NextResponse.json({ success: true });
+    }
+
+    // ... inside POST function ...
+
+    // --- 11. STOP BIDDING (Hide from App, move to History) ---
+    if (action === "STOP_BIDDING") {
+      const { orderId } = body;
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { status: "CANCELLED" } // Hides it from "GET_LOADS"
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // --- 12. GET HISTORY (See Cancelled/Completed Orders) ---
+    if (action === "GET_HISTORY") {
+      const history = await prisma.order.findMany({
+        where: { 
+          status: { not: "PENDING" } // Anything NOT live
+        },
+        include: { bids: true }, // Show past bids too
+        orderBy: { updatedAt: 'desc' }
+      });
+      return NextResponse.json({ success: true, history });
+    }
+
+    // --- 13. REPOST ORDER (Bring back to Live) ---
+    if (action === "REPOST_ORDER") {
+      const { orderId } = body;
+      
+      // 1. Reset Order Status
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { status: "PENDING" }
+      });
+
+      // 2. Optional: We keep old bids so you can see history, 
+      // or you could delete them here if you wanted a fresh start.
+      
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (error) {
-    return NextResponse.json({ error: "Server Error" }, { status: 500 });
+    console.error("Error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
-}
-
-// Allow GET requests too (for testing in browser)
-export async function GET() {
-  return NextResponse.json({ message: "Mobile API is Running 🚛" });
 }
