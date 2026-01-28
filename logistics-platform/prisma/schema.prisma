@@ -1,0 +1,322 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- 1. CORPORATE STRUCTURE (Offices) ---
+
+model Zone {
+  id        String   @id @default(uuid())
+  name      String // e.g. "North Zone"
+  createdAt DateTime @default(now())
+  offices   Office[]
+}
+
+model Office {
+  id     String  @id @default(uuid())
+  name   String // e.g. "Okhla Branch"
+  city   String
+  zoneId String
+  zone   Zone    @relation(fields: [zoneId], references: [id])
+  staff  User[]
+  orders Order[]
+  shipments Shipment[]
+}
+
+// --- 2. USERS (Staff) ---
+
+enum UserRole {
+  SUPER_ADMIN
+  
+  // OPERATIONS HIERARCHY
+  DEPT_HEAD        // Ops Head
+  ZONAL_MANAGER
+  REGION_MANAGER
+  OFFICE_MANAGER
+  SUPERVISOR
+  EMPLOYEE
+  
+  // SPECIAL DEPARTMENTS
+  VERIFIER         // Partner Help Desk (Documents + Tracking)
+  ACCOUNT_MANAGER  // Account Department (Billing)
+}
+
+model User {
+  id       String @id @default(uuid())
+  email    String @unique
+  password String
+  name     String
+
+  // ROLES (Power Level)
+  role       UserRole @default(OFFICE_MANAGER)
+
+  // DEPARTMENTS (Which Team?) <--- NEW FIELD
+  department Department @default(OPERATIONS)
+
+  officeId String?
+  office   Office? @relation(fields: [officeId], references: [id])
+
+  createdAt     DateTime @default(now())
+  ordersCreated Order[]
+  shipmentsCreated Shipment[]
+}
+
+// --- 3. TRUCKERS (The App Users) ---
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model TruckOwner {
+  id       String             @id @default(uuid())
+  fullName String
+  phone    String             @unique
+  status   VerificationStatus @default(PENDING) // This matches your code
+
+  // Verification Data
+  documents Document[] // <--- THIS WAS MISSING!
+  trucks    Truck[]
+  shipments Shipment[]
+  bids Bid[]
+  createdAt DateTime   @default(now())
+}
+
+model Document {
+  id           String     @id @default(uuid())
+  type         String // e.g. "License"
+  url          String
+  truckOwnerId String
+  truckOwner   TruckOwner @relation(fields: [truckOwnerId], references: [id])
+}
+
+model Truck {
+  id            String      @id @default(uuid())
+  vehicleNumber String      // e.g. "HR-55-A-9921"
+  truckType     String      // e.g. "Open Body"
+  capacity      String      // e.g. "20 Tons"
+  
+  // DOCUMENTS (URLs)
+  rcBook        String?     // Registration Certificate
+  insurance     String?     // Insurance Policy
+  fitness       String?     // Fitness Certificate
+  
+  // LINK TO OWNER
+  ownerId       String
+  owner         TruckOwner  @relation(fields: [ownerId], references: [id])
+  
+  // LINK TO SHIPMENTS
+  shipments     Shipment[]
+
+  // NEW: STATUS FOR EACH TRUCK
+  status        TruckStatus @default(PENDING) 
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+enum TruckStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// --- 4. LOGISTICS ---
+
+model Order {
+  id      String @id @default(uuid())
+  orderNo String @unique
+
+  customerName String
+  fromLocation String
+  toLocation   String
+  material     String
+  weight       String
+  truckSize    String
+  rate         Int
+
+  status OrderStatus @default(PENDING)
+
+  // RELATION 1: Created By User (FIXED)
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  // RELATION 2: Belongs to Office (NEW FIX)
+  // We make this optional (?) just in case an Admin creates it without an office
+  officeId String?
+  office   Office? @relation(fields: [officeId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shipment Shipment?
+
+  biddingSession BiddingSession?
+}
+
+// 5. DEFINE THE 5 DEPARTMENTS
+enum Department {
+  MANAGEMENT // Super Admins
+  HR // Human Resources
+  IT // Tech Support
+  PARTNER_HELP_DESK // Support for Truckers
+  OPERATIONS // Logistics & Field Work
+  ACCOUNTS // Finance & Billing
+}
+
+enum OrderStatus {
+  PENDING // Just created
+  ASSIGNED // Truck found
+  IN_TRANSIT // On the road
+  DELIVERED // Completed
+  CANCELLED // Cancelled
+}
+
+model Shipment {
+  id         String @id @default(uuid())
+  shipmentId String @unique // RLS123456
+
+  // 1. Link to Order (Which load is this?)
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  // 2. Link to Supplier (Who is carrying it?)
+  truckOwnerId String
+  truckOwner   TruckOwner @relation(fields: [truckOwnerId], references: [id])
+
+  // 3. Link to Vehicle
+  truckId String
+  truck   Truck  @relation(fields: [truckId], references: [id])
+
+  // 4. Driver Details (Snapshot for this trip)
+  driverName  String
+  driverPhone String
+
+  // 5. Money Matters
+  customerRate Int // What we charge client (from Order)
+  supplierRate Int // What we pay truck (YOUR PROFIT = Cust - Supp)
+
+  // 6. Tracking
+  status ShipmentStatus @default(booked)
+
+  // 7. Ownership (Hierarchy)
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  officeId String?
+  office   Office? @relation(fields: [officeId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // FINANCIAL STATUS
+  invoiceStatus       InvoiceStatus @default(UNBILLED) // Have we sent the bill?
+  customerPaymentStatus PaymentStatus @default(PENDING) // Did customer pay us?
+  driverPaymentStatus   PaymentStatus @default(PENDING) // Did we pay the truck?
+
+  // RELATIONS
+  invoice             Invoice? // Link to the official bill
+
+  // TRACKING HISTORY
+  trackingUpdates TrackingUpdate[]
+}
+
+enum ShipmentStatus {
+  booked // Truck assigned
+  at_pickup // Reached factory
+  in_transit // On the road
+  at_delivery // Reached destination
+  completed // Unloaded & POD received
+  cancelled
+}
+
+// --- BIDDING SYSTEM ---
+
+model BiddingSession {
+  id          String   @id @default(uuid())
+  
+  // Link to the Order being auctioned
+  orderId     String   @unique
+  order       Order    @relation(fields: [orderId], references: [id])
+  
+  // Settings
+  startTime   DateTime @default(now())
+  endTime     DateTime // When the timer runs out
+  basePrice   Int      // Starting Rate (Ops sets this)
+  
+  // State
+  status      BiddingStatus @default(LIVE)
+  
+  // Bids received
+  bids        Bid[]
+
+  createdAt   DateTime @default(now())
+}
+
+model Bid {
+  id                String   @id @default(uuid())
+  amount            Int      // The Driver's Offer (e.g. 38000)
+  
+  // Who placed the bid?
+  truckOwnerId      String
+  truckOwner        TruckOwner @relation(fields: [truckOwnerId], references: [id])
+  
+  // Which session?
+  biddingSessionId  String
+  biddingSession    BiddingSession @relation(fields: [biddingSessionId], references: [id])
+  
+  createdAt         DateTime @default(now())
+}
+
+enum BiddingStatus {
+  LIVE
+  ENDED
+  CANCELLED
+}
+
+model Invoice {
+  id          String   @id @default(uuid())
+  invoiceNo   String   @unique // e.g. "INV-2025-001"
+  amount      Int      // The final bill amount
+  gst         Int      @default(0) // Tax if applicable
+  totalAmount Int      // Amount + GST
+  
+  date        DateTime @default(now())
+  dueDate     DateTime
+  
+  // Link to Shipment
+  shipmentId  String   @unique
+  shipment    Shipment @relation(fields: [shipmentId], references: [id])
+  
+  createdAt   DateTime @default(now())
+}
+
+enum InvoiceStatus {
+  UNBILLED
+  GENERATED
+}
+
+enum PaymentStatus {
+  PENDING
+  RECEIVED
+  PAID
+}
+
+model TrackingUpdate {
+  id          String   @id @default(uuid())
+  
+  status      String   // e.g. "In Transit", "Stopped", "Delivered"
+  location    String   // e.g. "Jaipur Toll Plaza"
+  remarks     String?  // e.g. "Driver eating food, will move in 1 hr"
+  
+  shipmentId  String
+  shipment    Shipment @relation(fields: [shipmentId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  createdBy   String   // Name of the Help Desk person
+}

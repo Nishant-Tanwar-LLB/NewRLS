@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 🎨 CENTRAL COLOR CONTROL 🎨 */
+:root {
+  /* The Deep Saffron (Sidebar, Buttons) */
+  --brand-primary: #FF7D29;
+
+  /* The Soft Saffron (Hover effects, Gradients) */
+  --brand-secondary: #FFBF78;
+
+  /* The Light Gold (Borders, Cards) */
+  --brand-highlight: #FFEEA9;
+
+  /* The Cream Background (Main Page) */
+  --brand-cream: #FEFFD2;
+}
+
+/* Optional: Apply cream background to body automatically */
+body {
+  background-color: var(--brand-cream);
+}
