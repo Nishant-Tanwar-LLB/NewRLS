@@ -1,3 +1,6 @@
+// This is your main database configuration file.
+// It defines all your tables (Models) and their relationships.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -54,7 +57,7 @@ model User {
   // ROLES (Power Level)
   role       UserRole @default(OFFICE_MANAGER)
 
-  // DEPARTMENTS (Which Team?) <--- NEW FIELD
+  // DEPARTMENTS (Which Team?)
   department Department @default(OPERATIONS)
 
   officeId String?
@@ -77,10 +80,10 @@ model TruckOwner {
   id       String             @id @default(uuid())
   fullName String
   phone    String             @unique
-  status   VerificationStatus @default(PENDING) // This matches your code
+  status   VerificationStatus @default(PENDING) 
 
   // Verification Data
-  documents Document[] // <--- THIS WAS MISSING!
+  documents Document[] 
   trucks    Truck[]
   shipments Shipment[]
   bids Bid[]
@@ -102,9 +105,9 @@ model Truck {
   capacity      String      // e.g. "20 Tons"
   
   // DOCUMENTS (URLs)
-  rcBook        String?     // Registration Certificate
-  insurance     String?     // Insurance Policy
-  fitness       String?     // Fitness Certificate
+  rcBook        String?
+  insurance     String?
+  fitness       String?
   
   // LINK TO OWNER
   ownerId       String
@@ -142,12 +145,11 @@ model Order {
 
   status OrderStatus @default(PENDING)
 
-  // RELATION 1: Created By User (FIXED)
+  // RELATION 1: Created By User
   createdById String
   createdBy   User   @relation(fields: [createdById], references: [id])
 
-  // RELATION 2: Belongs to Office (NEW FIX)
-  // We make this optional (?) just in case an Admin creates it without an office
+  // RELATION 2: Belongs to Office
   officeId String?
   office   Office? @relation(fields: [officeId], references: [id])
 
@@ -155,7 +157,6 @@ model Order {
   updatedAt DateTime @updatedAt
 
   shipment Shipment?
-
   biddingSession BiddingSession?
 }
 
@@ -181,11 +182,11 @@ model Shipment {
   id         String @id @default(uuid())
   shipmentId String @unique // RLS123456
 
-  // 1. Link to Order (Which load is this?)
+  // 1. Link to Order
   orderId String @unique
   order   Order  @relation(fields: [orderId], references: [id])
 
-  // 2. Link to Supplier (Who is carrying it?)
+  // 2. Link to Supplier
   truckOwnerId String
   truckOwner   TruckOwner @relation(fields: [truckOwnerId], references: [id])
 
@@ -193,18 +194,18 @@ model Shipment {
   truckId String
   truck   Truck  @relation(fields: [truckId], references: [id])
 
-  // 4. Driver Details (Snapshot for this trip)
+  // 4. Driver Details
   driverName  String
   driverPhone String
 
   // 5. Money Matters
-  customerRate Int // What we charge client (from Order)
-  supplierRate Int // What we pay truck (YOUR PROFIT = Cust - Supp)
+  customerRate Int // What we charge client
+  supplierRate Int // What we pay truck
 
   // 6. Tracking
   status ShipmentStatus @default(booked)
 
-  // 7. Ownership (Hierarchy)
+  // 7. Ownership
   createdById String
   createdBy   User   @relation(fields: [createdById], references: [id])
 
@@ -214,16 +215,14 @@ model Shipment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // FINANCIAL STATUS
-  invoiceStatus       InvoiceStatus @default(UNBILLED) // Have we sent the bill?
-  customerPaymentStatus PaymentStatus @default(PENDING) // Did customer pay us?
-  driverPaymentStatus   PaymentStatus @default(PENDING) // Did we pay the truck?
-
+  // --- FINANCIAL STATUS (RENAMED TO FIX BUG) ---
+  invoiceState        InvoiceStatus @default(UNBILLED) 
+  customerPaymentStatus PaymentStatus @default(PENDING) 
+  driverPaymentStatus   PaymentStatus @default(PENDING) 
+  
   // RELATIONS
-  invoice             Invoice? // Link to the official bill
-
-  // TRACKING HISTORY
-  trackingUpdates TrackingUpdate[]
+  invoice             Invoice?
+  trackingUpdates     TrackingUpdate[]
 }
 
 enum ShipmentStatus {
@@ -239,34 +238,25 @@ enum ShipmentStatus {
 
 model BiddingSession {
   id          String   @id @default(uuid())
-  
-  // Link to the Order being auctioned
   orderId     String   @unique
   order       Order    @relation(fields: [orderId], references: [id])
   
-  // Settings
   startTime   DateTime @default(now())
-  endTime     DateTime // When the timer runs out
-  basePrice   Int      // Starting Rate (Ops sets this)
+  endTime     DateTime 
+  basePrice   Int      
   
-  // State
   status      BiddingStatus @default(LIVE)
-  
-  // Bids received
   bids        Bid[]
-
   createdAt   DateTime @default(now())
 }
 
 model Bid {
-  id                String   @id @default(uuid())
-  amount            Int      // The Driver's Offer (e.g. 38000)
+  id                String  @id @default(uuid())
+  amount            Int      
   
-  // Who placed the bid?
   truckOwnerId      String
   truckOwner        TruckOwner @relation(fields: [truckOwnerId], references: [id])
   
-  // Which session?
   biddingSessionId  String
   biddingSession    BiddingSession @relation(fields: [biddingSessionId], references: [id])
   
@@ -282,14 +272,13 @@ enum BiddingStatus {
 model Invoice {
   id          String   @id @default(uuid())
   invoiceNo   String   @unique // e.g. "INV-2025-001"
-  amount      Int      // The final bill amount
-  gst         Int      @default(0) // Tax if applicable
-  totalAmount Int      // Amount + GST
+  amount      Int      
+  gst         Int      @default(0) 
+  totalAmount Int      
   
   date        DateTime @default(now())
   dueDate     DateTime
   
-  // Link to Shipment
   shipmentId  String   @unique
   shipment    Shipment @relation(fields: [shipmentId], references: [id])
   
@@ -309,14 +298,11 @@ enum PaymentStatus {
 
 model TrackingUpdate {
   id          String   @id @default(uuid())
-  
-  status      String   // e.g. "In Transit", "Stopped", "Delivered"
+  status      String   // e.g. "In Transit"
   location    String   // e.g. "Jaipur Toll Plaza"
-  remarks     String?  // e.g. "Driver eating food, will move in 1 hr"
-  
+  remarks     String?  
   shipmentId  String
   shipment    Shipment @relation(fields: [shipmentId], references: [id])
-  
   createdAt   DateTime @default(now())
-  createdBy   String   // Name of the Help Desk person
+  createdBy   String   
 }

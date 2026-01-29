@@ -2,22 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 🎨 CENTRAL COLOR CONTROL 🎨 */
+/* 🎨 APP THEME: BLUE & ORANGE 🎨 */
 :root {
-  /* The Deep Saffron (Sidebar, Buttons) */
-  --brand-primary: #FF7D29;
+  /* Primary Orange (Matches App's Action Color) */
+  --brand-primary: #ea580c; 
 
-  /* The Soft Saffron (Hover effects, Gradients) */
-  --brand-secondary: #FFBF78;
+  /* Secondary/Hover Orange */
+  --brand-secondary: #f97316;
 
-  /* The Light Gold (Borders, Cards) */
-  --brand-highlight: #FFEEA9;
+  /* The Dark Blue (Matches App Header/Sidebar) */
+  --brand-dark: #0f172a;
 
-  /* The Cream Background (Main Page) */
-  --brand-cream: #FEFFD2;
+  /* The Light Grey Background (Matches App Dashboard BG) */
+  --brand-cream: #f1f5f9; 
+  
+  /* Highlight/Borders */
+  --brand-highlight: #e2e8f0;
 }
 
-/* Optional: Apply cream background to body automatically */
 body {
   background-color: var(--brand-cream);
+  color: #0f172a; /* Default text is Dark Blue */
 }
