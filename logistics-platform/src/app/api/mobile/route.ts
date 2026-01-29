@@ -73,29 +73,38 @@ export async function POST(req: Request) {
       });
     }
 
-    // --- 4. GET LOADS (SMART VERSION: Shows Lowest Bid) ---
+    // --- 4. GET LOADS (FIXED: Nested Bids) ---
     if (action === "GET_LOADS") {
-      // 1. Fetch Orders
+      // 1. Fetch Orders with Nested Bids
       const orders = await prisma.order.findMany({
-        where: { status: "PENDING" }, // Only show open loads
-        include: { bids: true }, // <--- NEW: Get bids too!
+        where: { status: "PENDING" },
+        include: { 
+          // Go through the BiddingSession to find bids
+          biddingSession: {
+            include: {
+              bids: true
+            }
+          }
+        }       
       });
 
-      // 2. Calculate "Current Best Price" for each load
+      // 2. Calculate "Current Best Price"
       const formattedLoads = orders.map((o) => {
-        // Find lowest bid
-        const lowestBid =
-          o.bids.length > 0
-            ? Math.min(...o.bids.map((b) => parseInt(b.amount)))
-            : parseInt(o.rate);
+        // Access bids via biddingSession (handle case where session is null)
+        const activeBids = o.biddingSession?.bids || [];
+
+        // Find lowest bid amount
+        const lowestBid = activeBids.length > 0 
+          ? Math.min(...activeBids.map(b => b.amount)) 
+          : o.rate; // Use base rate if no bids
 
         return {
           id: o.id,
           from: o.fromLocation,
           to: o.toLocation,
-          price: "₹" + lowestBid, // <--- Shows Lowest Bid, not Base Price!
+          price: "₹" + lowestBid, 
           weight: o.weight,
-          type: o.material,
+          type: o.material
         };
       });
 

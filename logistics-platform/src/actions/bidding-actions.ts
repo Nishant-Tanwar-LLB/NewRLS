@@ -39,3 +39,19 @@ export async function stopBiddingAction(sessionId: string) {
   });
   revalidatePath("/dashboard/bidding");
 }
+
+// --- 3. REPOST AUCTION (Restart a stopped auction) ---
+export async function repostAuctionAction(sessionId: string) {
+  // Reset the auction to LIVE for another 30 minutes (default)
+  // You can make this smarter later, but this gets it back on screen instantly.
+  await prisma.biddingSession.update({
+    where: { id: sessionId },
+    data: { 
+      status: "LIVE",
+      startTime: new Date(),
+      endTime: new Date(Date.now() + 30 * 60000) // +30 mins
+    }
+  });
+
+  revalidatePath("/dashboard/bidding");
+}
